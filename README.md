@@ -1,6 +1,6 @@
 # ADXL345 I2C driver
 
-Two separate pieces for the Adafruit ADXL345 on a Raspberry Pi Zero 2 W:
+Two complementary Linux I²C implementations for the ADXL345 accelerometer, validated on a quad-core Arm Cortex-A53 platform:
 
 - A C++23 userspace library. It opens `/dev/i2c-N` and polls the chip.
 - A loadable kernel module, `kernel/adxl345_custom.c`. It is C, built out of tree. The default is a GPIO17 data-ready interrupt. `irq_gpio=-1` polls over I2C.
