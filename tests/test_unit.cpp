@@ -1,10 +1,12 @@
 #include "harness.hpp"
 #include "mock_bus.hpp"
 
+#include "adxl345/custom_mod_abi.h"
 #include "adxl345/driver.hpp"
 
 #include <cerrno>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
@@ -282,6 +284,38 @@ void run_unit_tests() {
         CHECK_NEAR(g.x_g, 4.0 / 256.0, 1e-12);
         CHECK_NEAR(g.y_g, -5.0 / 256.0, 1e-12);
         CHECK_NEAR(g.z_g, 1.0, 1e-12);
+    });
+
+    suite.test("kernel sample is 24 bytes with the interrupt fields", [] {
+        CHECK_EQ(sizeof(adxl345_custom_sample), 24u);
+        CHECK_EQ(offsetof(adxl345_custom_sample, x), 0u);
+        CHECK_EQ(offsetof(adxl345_custom_sample, y), 2u);
+        CHECK_EQ(offsetof(adxl345_custom_sample, z), 4u);
+        CHECK_EQ(offsetof(adxl345_custom_sample, lsb_per_g), 6u);
+        CHECK_EQ(offsetof(adxl345_custom_sample, sequence), 8u);
+        CHECK_EQ(offsetof(adxl345_custom_sample, overruns), 12u);
+        CHECK_EQ(offsetof(adxl345_custom_sample, timestamp_ns), 16u);
+        CHECK_EQ(ADXL345_CUSTOM_LSB_PER_G, 256);
+        CHECK_EQ(ADXL345_CUSTOM_INT_DATA_READY, 0x80u);
+        CHECK_EQ(ADXL345_CUSTOM_INT_OVERRUN, 0x01u);
+        CHECK_EQ(ADXL345_CUSTOM_INT_ENABLE_BITS, 0x81u);
+        CHECK_EQ(adxl345_custom_int_map(1), 0u);
+        CHECK_EQ(adxl345_custom_int_map(2), 0x81u);
+        CHECK_EQ(ADXL345_CUSTOM_IRQ_TYPE_LEVEL_HIGH, 4);
+    });
+
+    suite.test("first interrupt sample is not a drop", [] {
+        adxl345_u32 sequence = 0;
+        adxl345_u32 read_seq = 0;
+        adxl345_u32 dropped = 0;
+        CHECK_EQ(adxl345_custom_note_publish(&sequence, read_seq, &dropped), 1u);
+        CHECK_EQ(sequence, 1u);
+        CHECK_EQ(dropped, 0u);
+        CHECK_EQ(adxl345_custom_note_publish(&sequence, read_seq, &dropped), 2u);
+        CHECK_EQ(dropped, 1u);
+        read_seq = sequence;
+        CHECK_EQ(adxl345_custom_note_publish(&sequence, read_seq, &dropped), 3u);
+        CHECK_EQ(dropped, 1u);
     });
 
     suite.test("bus failures propagate", [] {

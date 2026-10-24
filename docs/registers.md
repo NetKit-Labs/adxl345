@@ -91,6 +91,8 @@ Same positions in `INT_ENABLE`, `INT_MAP`, and `INT_SOURCE`:
 | D1 | Watermark |
 | D0 | Overrun |
 
+The kernel module enables DATA_READY and OVERRUN together (`INT_ENABLE` `0x81`). `INT_MAP` `0x00` sends both to INT1. `INT_MAP` `0x81` sends both to INT2. Reading `DATAX0` through `DATAZ1` clears those two bits. The other latched events clear when `INT_SOURCE` is read. `kernel/adxl34x-overlay.dts` describes that pin to the image's `adxl34x` driver as GPIO17, level-high (`IRQ_TYPE_LEVEL_HIGH`, value 4).
+
 ## FIFO
 
 `FIFO_CTL` D7:D6 is the mode: bypass `00`, FIFO `01`, stream `10`, trigger `11`. D5 selects INT2 as the trigger pin. D4:D0 is the watermark or the number of samples kept after a trigger, 0 through 31.

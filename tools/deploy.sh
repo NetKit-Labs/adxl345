@@ -22,4 +22,4 @@ COPYFILE_DISABLE=1 tar -C "$ROOT" -czf "$stage/adxl345.tgz" \
 
 "$SSH" ssh "sudo raspi-config nonint do_i2c 0; mkdir -p $REMOTE"
 "$SSH" scp "$stage/adxl345.tgz" "$REMOTE/adxl345.tgz"
-"$SSH" ssh "tar -xzf $REMOTE/adxl345.tgz -C $REMOTE && rm -f $REMOTE/adxl345.tgz && make -C $REMOTE clean all test && $REMOTE/build/adxl345 scan && $REMOTE/build/adxl345_hw && bash $REMOTE/tools/run_kernel_compare.sh"
+"$SSH" ssh "tar -xzf $REMOTE/adxl345.tgz -C $REMOTE && rm -f $REMOTE/adxl345.tgz && sudo -n rmmod adxl345_custom || true && make -C $REMOTE clean all test && $REMOTE/build/adxl345 scan && $REMOTE/build/adxl345_hw && bash $REMOTE/tools/run_kernel_compare.sh"

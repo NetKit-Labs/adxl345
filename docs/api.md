@@ -82,3 +82,14 @@ These do not touch a bus, and the unit tests call them directly.
 | `self_test_limits` | Tables 14–18 |
 
 Nominal conversion uses 256 LSB/g. At 3.3 V the datasheet's typical X/Y sensitivity moves to about 265 LSB/g and Z stays 256. The driver does not apply that second-order correction; pass it yourself if you need it.
+
+## Kernel sample
+
+`/dev/adxl345_custom` returns one `struct adxl345_custom_sample` from `include/adxl345/custom_mod_abi.h` (24 bytes). The same header holds the rules the module uses for the interrupt map and for counting an unread sample:
+
+| Function | Role |
+| --- | --- |
+| `adxl345_custom_int_map` | `0` for INT1, `0x81` for INT2 (data-ready and overrun) |
+| `adxl345_custom_note_publish` | Next sequence number. Counts a drop when the previous sample was not taken |
+
+The module, the comparison program, and the mock-bus tests all include that header. Register programming for the C++ library is above. The load path, GPIO17, and the image-driver overlay are in [kernel.md](kernel.md).

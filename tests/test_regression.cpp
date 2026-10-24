@@ -1,6 +1,7 @@
 #include "harness.hpp"
 #include "mock_bus.hpp"
 
+#include "adxl345/custom_mod_abi.h"
 #include "adxl345/driver.hpp"
 
 #include <chrono>
@@ -341,5 +342,33 @@ void run_regression_tests() {
         }
         CHECK(threw);
         CHECK_EQ(bus.log().size(), 0u);
+    });
+
+    suite.test("interrupt publish drop trace", [] {
+        adxl345_u32 sequence = 0;
+        adxl345_u32 read_seq = 0;
+        adxl345_u32 dropped = 0;
+        const adxl345_u32 expected_drop[] = {0u, 1u, 2u, 3u};
+        for (adxl345_u32 expect_dropped : expected_drop) {
+            const adxl345_u32 before = sequence;
+            const adxl345_u32 published =
+                adxl345_custom_note_publish(&sequence, read_seq, &dropped);
+            CHECK_EQ(published, before + 1u);
+            CHECK_EQ(published, sequence);
+            CHECK_EQ(dropped, expect_dropped);
+        }
+        read_seq = sequence;
+        for (int i = 0; i < 5; ++i) {
+            const adxl345_u32 before_dropped = dropped;
+            const adxl345_u32 published =
+                adxl345_custom_note_publish(&sequence, read_seq, &dropped);
+            read_seq = published;
+            CHECK_EQ(dropped, before_dropped);
+        }
+        const adxl345_u32 caught_up = dropped;
+        (void)adxl345_custom_note_publish(&sequence, read_seq, &dropped);
+        (void)adxl345_custom_note_publish(&sequence, read_seq, &dropped);
+        CHECK_EQ(dropped, caught_up + 1u);
+        CHECK_EQ(sequence, 11u);
     });
 }

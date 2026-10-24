@@ -1,6 +1,7 @@
 # The mock-bus unit and regression tests, plus a compile of the Linux
-# userspace programs. The kernel module and the on-target runs need the
-# Pi, its kernel headers, and the ADXL345, so they stay out of this job.
+# userspace programs (CLI, hardware check, driver comparison, IRQ check).
+# The kernel module and the on-target runs need the Pi, its kernel headers,
+# and the ADXL345, so they stay out of this job.
 name: CI
 
 on:

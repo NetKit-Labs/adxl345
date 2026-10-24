@@ -1,0 +1,37 @@
+/dts-v1/;
+/plugin/;
+
+/* Gives the image's adxl34x driver an IRQ for the INT wire on GPIO17.
+ * IRQ_TYPE_LEVEL_HIGH is 4. The pin stays high until the data registers are read.
+ */
+/ {
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target = <&gpio>;
+		__overlay__ {
+			adxl34x_pins: adxl34x_pins {
+				brcm,pins = <17>;
+				brcm,function = <0>;
+				brcm,pull = <0>;
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&i2c_arm>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			adxl34x@53 {
+				compatible = "adi,adxl345";
+				reg = <0x53>;
+				interrupt-parent = <&gpio>;
+				interrupts = <17 4>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&adxl34x_pins>;
+			};
+		};
+	};
+};

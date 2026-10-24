@@ -7,6 +7,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <format>
@@ -62,6 +63,7 @@ struct Context {
   fs::path root;
   bool keep_custom = false;
   bool overlay_on = false;
+  std::string input_overlay;
 };
 
 [[nodiscard]] std::string trim(std::string text) {
@@ -295,7 +297,20 @@ void drop_overlay(Context& ctx) {
   std::this_thread::sleep_for(100ms);
 }
 
+void drop_input_overlay(Context& ctx) {
+  if (ctx.input_overlay.empty()) {
+    return;
+  }
+  const CmdResult result = run({tool("dtoverlay").string(), "-r", ctx.input_overlay});
+  if (result.status != 0) {
+    std::println(std::cerr, "dtoverlay -r {} failed: {}", ctx.input_overlay, trim(result.out));
+  }
+  ctx.input_overlay.clear();
+  std::this_thread::sleep_for(200ms);
+}
+
 void release_bus(Context& ctx) {
+  drop_input_overlay(ctx);
   drop_overlay(ctx);
   rmmod("adxl345_custom");
   std::error_code ec;
@@ -347,44 +362,142 @@ void print_mean(std::string_view label, const Mean& mean, double lsb) {
   return text.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
 }
 
-void test_input(Context& ctx) {
-  std::println("\n== pre-existing input driver (adxl34x) ==");
+[[nodiscard]] bool apply_local_input_overlay(Context& ctx) {
+  const fs::path dtc = tool("dtc");
+  const fs::path dtoverlay = tool("dtoverlay");
+  std::error_code ec;
+  const fs::path dts = ctx.root / "kernel" / "adxl34x-overlay.dts";
+  if (!fs::is_regular_file(dtc, ec) || !fs::is_regular_file(dtoverlay, ec) ||
+      !fs::is_regular_file(dts, ec)) {
+    std::println("local adxl34x overlay is unavailable");
+    return false;
+  }
+  const fs::path dtbo = "/tmp/adxl34x-irq.dtbo";
+  const CmdResult built = run({dtc.string(), "-@", "-I", "dts", "-O", "dtb", "-o",
+                               dtbo.string(), dts.string()});
+  if (built.status != 0) {
+    std::println("dtc failed: {}", trim(built.out));
+    return false;
+  }
+  const CmdResult applied = run({dtoverlay.string(), "-d", "/tmp", "adxl34x-irq"});
+  if (applied.status != 0) {
+    std::println("dtoverlay adxl34x-irq failed: {}", trim(applied.out));
+    return false;
+  }
+  ctx.input_overlay = "adxl34x-irq";
+  std::this_thread::sleep_for(400ms);
+  return true;
+}
+
+[[nodiscard]] fs::path find_input_event() {
+  std::error_code ec;
+  const fs::path root = "/sys/class/input";
+  if (!fs::exists(root, ec)) {
+    return {};
+  }
+  for (const fs::directory_entry& entry : fs::directory_iterator(root, ec)) {
+    const std::string filename = entry.path().filename().string();
+    if (!filename.starts_with("event")) {
+      continue;
+    }
+    const std::string name = trim(read_text(entry.path() / "device" / "name"));
+    if (name == "ADXL34x accelerometer") {
+      return fs::path("/dev/input") / filename;
+    }
+  }
+  return {};
+}
+
+[[nodiscard]] bool read_position(Sample& sample) {
+  const std::string text = trim(read_text(client_path() / "position"));
+  int x = 0;
+  int y = 0;
+  int z = 0;
+  if (std::sscanf(text.c_str(), "(%d, %d, %d)", &x, &y, &z) != 3) {
+    return false;
+  }
+  sample.x = static_cast<double>(x);
+  sample.y = static_cast<double>(y);
+  sample.z = static_cast<double>(z);
+  return true;
+}
+
+void print_irq_lines() {
+  std::ifstream input("/proc/interrupts");
+  std::string line;
+  while (std::getline(input, line)) {
+    if (line.find("adxl") != std::string::npos || line.find("1-0053") != std::string::npos) {
+      std::println("irq: {}", trim(line));
+    }
+  }
+}
+
+[[nodiscard]] bool test_input(Context& ctx, std::vector<Sample>& samples) {
+  std::println("\n== shipped input driver (adxl34x) with GPIO17 ==");
+  samples.clear();
   const auto before = adxl_lines(dmesg());
   const CmdResult probed = run({tool("modprobe").string(), "adxl34x-i2c"});
   if (probed.status != 0) {
     std::println("modprobe adxl34x-i2c failed: {}", trim(probed.out));
-    return;
+    return false;
   }
-  std::string error;
-  const bool wrote = write_sysfs(adapter_path() / "new_device",
-                                 std::format("adxl34x 0x{:x}", kAddr), error);
-  std::this_thread::sleep_for(200ms);
+  /* The image i2c-sensor,adxl345 overlay leaves interrupt-parent unresolved,
+   * so adxl34x still probes with irq 0. This overlay only names GPIO17. */
+  if (!apply_local_input_overlay(ctx)) {
+    return false;
+  }
   const std::string driver = bound_driver();
-  std::error_code ec;
-  const bool present = fs::exists(client_path(), ec);
-  const std::string position = trim(read_text(client_path() / "position"));
   print_new_kernel(before, adxl_lines(dmesg()));
-  std::println("new_device write: {}", wrote ? "ok" : error);
-  std::println("client 1-0053: {}", present ? "present" : "absent");
+  std::println("overlay: {}", ctx.input_overlay);
   std::println("bound driver: {}", driver.empty() ? "(none)" : driver);
-  if (!position.empty()) {
-    std::println("position: {}", position);
+  std::println("rate code: {}", trim(read_text(client_path() / "rate")).empty()
+                                   ? "(missing)"
+                                   : trim(read_text(client_path() / "rate")));
+  if (driver != "adxl34x") {
+    std::println("result: adxl34x did not bind with GPIO17 as its interrupt");
+    return false;
   }
-  if (driver.empty()) {
-    std::println(
-        "result: no live samples. adxl34x probe stops with -ENODEV when irq is 0, "
-        "and INT1/INT2 are not wired on this four-wire hookup.");
-  } else if (position.empty() || position == "(0, 0, 0)") {
-    std::println(
-        "result: driver bound, but position is zero. That attribute is updated "
-        "from the interrupt handler, and no interrupt line is connected.");
-  } else {
-    std::println("result: driver bound and reported position {}", position);
+
+  fs::path event;
+  for (int i = 0; i < 40 && event.empty(); ++i) {
+    event = find_input_event();
+    if (event.empty()) {
+      std::this_thread::sleep_for(50ms);
+    }
   }
-  delete_client();
-  rmmod("adxl34x_i2c");
-  rmmod("adxl34x");
-  (void)ctx;
+  if (event.empty()) {
+    std::println("ADXL34x accelerometer input node was not created");
+    return false;
+  }
+  const int fd = ::open(event.c_str(), O_RDONLY | O_NONBLOCK);
+  if (fd < 0) {
+    std::println("open {} failed: {}", event.string(), std::strerror(errno));
+    return false;
+  }
+  std::println("holding {} open so the driver leaves measure mode enabled", event.string());
+  std::this_thread::sleep_for(150ms);
+  for (int i = 0; i < kSamples; ++i) {
+    Sample sample;
+    if (!read_position(sample)) {
+      std::println("position sysfs was not a sample");
+      ::close(fd);
+      return false;
+    }
+    samples.push_back(sample);
+    std::this_thread::sleep_for(50ms);
+  }
+  print_irq_lines();
+  ::close(fd);
+  if (samples.empty()) {
+    return false;
+  }
+  const Mean mean = summarize(samples);
+  std::println("samples: {}  first raw {:g} {:g} {:g}  mean raw {:g} {:g} {:g}",
+               samples.size(), samples.front().x, samples.front().y, samples.front().z,
+               mean.x, mean.y, mean.z);
+  const bool live = mean.mag() > 1.0;
+  std::println("result: {}", live ? "live samples from the image driver" : "position stayed near zero");
+  return live;
 }
 
 [[nodiscard]] bool apply_overlay(Context& ctx) {
@@ -609,7 +722,22 @@ void cleanup(Context& ctx) {
   }
 }
 
-[[nodiscard]] int compare(const Mean& iio, const Mean& custom, double iio_scale) {
+[[nodiscard]] bool close_enough(const Mean& left, const Mean& right) {
+  const double lx = left.x / kLsbPerG;
+  const double ly = left.y / kLsbPerG;
+  const double lz = left.z / kLsbPerG;
+  const double rx = right.x / kLsbPerG;
+  const double ry = right.y / kLsbPerG;
+  const double rz = right.z / kLsbPerG;
+  const double lg = std::sqrt(lx * lx + ly * ly + lz * lz);
+  const double rg = std::sqrt(rx * rx + ry * ry + rz * rz);
+  return std::abs(lx - rx) <= kAxisTolG && std::abs(ly - ry) <= kAxisTolG &&
+         std::abs(lz - rz) <= kAxisTolG && std::abs(lg - rg) <= kMagTolG &&
+         lg >= kGravityMin && lg <= kGravityMax && rg >= kGravityMin && rg <= kGravityMax;
+}
+
+[[nodiscard]] int compare(const Mean& iio, const Mean& custom, double iio_scale,
+                          const Mean& shipped) {
   const double ix = iio.x / kLsbPerG;
   const double iy = iio.y / kLsbPerG;
   const double iz = iio.z / kLsbPerG;
@@ -624,10 +752,12 @@ void cleanup(Context& ctx) {
   const bool axis_ok = std::abs(ix - cx) <= kAxisTolG && std::abs(iy - cy) <= kAxisTolG &&
                        std::abs(iz - cz) <= kAxisTolG;
   const bool mag_ok = std::abs(ig - cg) <= kMagTolG;
+  const bool shipped_ok = close_enough(shipped, custom);
 
   std::println("\n== comparison (both converted at {} LSB/g) ==", static_cast<int>(kLsbPerG));
   std::println("{:22} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}", "", "raw x", "raw y",
                "raw z", "|raw|", "x g", "y g", "z g", "|g|");
+  print_mean("adxl34x (image)", shipped, kLsbPerG);
   print_mean("IIO adxl345_i2c", iio, kLsbPerG);
   print_mean("adxl345_custom", custom, kLsbPerG);
   Mean delta;
@@ -655,9 +785,10 @@ void cleanup(Context& ctx) {
                kMagTolG);
   std::println("gravity band: {:.2f} g to {:.2f} g", kGravityMin, kGravityMax);
   std::println("gravity band: {}", gravity_ok ? "pass" : "fail");
-  std::println("per-axis delta: {}", axis_ok ? "pass" : "fail");
-  std::println("magnitude delta: {}", mag_ok ? "pass" : "fail");
-  if (gravity_ok && axis_ok && mag_ok) {
+  std::println("IIO per-axis delta: {}", axis_ok ? "pass" : "fail");
+  std::println("IIO magnitude delta: {}", mag_ok ? "pass" : "fail");
+  std::println("image driver vs custom: {}", shipped_ok ? "pass" : "fail");
+  if (gravity_ok && axis_ok && mag_ok && shipped_ok) {
     std::println("result: PASS");
     return 0;
   }
@@ -683,7 +814,8 @@ void cleanup(Context& ctx) {
   std::println("samples: {} per driver, taken one driver at a time", kSamples);
 
   release_bus(ctx);
-  test_input(ctx);
+  std::vector<Sample> input_samples;
+  const bool input_ok = test_input(ctx, input_samples);
   release_bus(ctx);
 
   std::vector<Sample> iio_samples;
@@ -694,8 +826,9 @@ void cleanup(Context& ctx) {
   release_bus(ctx);
   const bool custom_ok = test_custom(ctx, custom_samples, custom_lsb);
 
-  if (!iio_ok || !custom_ok) {
+  if (!input_ok || !iio_ok || !custom_ok) {
     std::println("\nresult: FAIL");
+    std::println("image adxl34x samples: {}", input_ok ? "yes" : "no");
     std::println("IIO samples: {}", iio_ok ? "yes" : "no");
     std::println("custom samples: {}", custom_ok ? "yes" : "no");
     if (ctx.keep_custom) {
@@ -703,7 +836,8 @@ void cleanup(Context& ctx) {
     }
     return 2;
   }
-  const int code = compare(summarize(iio_samples), summarize(custom_samples), iio_scale);
+  const int code = compare(summarize(iio_samples), summarize(custom_samples), iio_scale,
+                           summarize(input_samples));
   std::println("left loaded: adxl345_custom  /dev/adxl345_custom");
   std::println("unload with: rmmod adxl345_custom");
   return code;

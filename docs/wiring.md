@@ -1,6 +1,6 @@
 # Wiring
 
-Adafruit ADXL345 breakout to a Raspberry Pi Zero 2 W, I2C mode. Only four wires are required. The breakout pulls CS high, which selects I2C, and pulls SDO low, which selects address `0x53`.
+Adafruit ADXL345 breakout to a Raspberry Pi Zero 2 W, I2C mode. Five wires: power, ground, SDA, SCL, and the interrupt output. The breakout pulls CS high, which selects I2C, and pulls SDO low, which selects address `0x53`.
 
 | Breakout | Pi Zero 2 W | Notes |
 | --- | --- | --- |
@@ -8,12 +8,13 @@ Adafruit ADXL345 breakout to a Raspberry Pi Zero 2 W, I2C mode. Only four wires 
 | GND | Pin 6 | Any ground pin is fine. |
 | SDA | Pin 3, GPIO2 | I2C1 data. The Pi already has the pull-ups. |
 | SCL | Pin 5, GPIO3 | I2C1 clock. |
+| INT | Pin 11, GPIO17 | The breakout's interrupt output. Data-ready is routed here. |
 
-Leave CS, SDO, INT1, and INT2 unconnected for this setup.
+Leave CS and SDO unconnected. The board's silkscreen may say INT rather than INT1 or INT2. The module tries INT1, then INT2, and keeps the line that produces data-ready.
 
 - Tie SDO to 3.3 V before power-up and the address becomes `0x1D`. The scanner tries `0x53`, then `0x1D`.
 - Pull CS low and the part enters SPI. This driver will not see it. The Adafruit pull-up keeps CS high if you leave the pin alone.
-- INT1 and INT2 are push-pull. Map events with `map_interrupts()` if you wire them later. The driver polls `INT_SOURCE` and does not require the pins.
+- INT is push-pull and active high. The kernel module requests GPIO17 as a level-high interrupt. A weak pull-down on the Pi keeps a disconnected wire from floating.
 
 ## Enable the bus
 

@@ -1,6 +1,6 @@
 # Tests
 
-Three layers. `make test` always builds and runs the mock-bus suites. On Linux it also compiles the CLI, `build/adxl345_hw`, and `build/adxl345_compare`, and it does not run those programs.
+Three layers. `make test` always builds and runs the mock-bus suites. On Linux it also compiles the CLI, `build/adxl345_hw`, `build/adxl345_compare`, and `build/adxl345_irq`, and it does not run those programs.
 
 ## Unit tests
 
@@ -18,6 +18,8 @@ Three layers. `make test` always builds and runs the mock-bus suites. On Linux i
 - A wrong DEVID throws `Error::bad_device_id` after a single read of register `0x00`
 - Standby samples read as zero; measurement samples convert
 - An injected bus error surfaces as `std::system_error`
+- The kernel sample is 24 bytes. `sequence` is at offset 8, `overruns` at 12, and `timestamp_ns` at 16. INT1 maps to `0x00`, INT2 maps data-ready and overrun to `0x81`, and the level-high flag is 4
+- The first published interrupt sample does not count as dropped. A second publish before that sample is taken does
 
 ## Regression tests
 
@@ -35,6 +37,7 @@ Three layers. `make test` always builds and runs the mock-bus suites. On Linux i
 - `read_raw_when_ready(0ms)` times out until a sample sets data-ready, then returns that sample
 - Self-test on the mock applies a +100, −100, +200 LSB shift, reports a pass against Table 15, writes `0x0B` then `0x8B`, and restores format `0x00`, rate `0x0A`, and power `0x00`
 - A 10 LSB shift fails the minimum. A 5 V supply argument throws before any bus transaction
+- Four publishes with no reader leave `dropped` at 3. Catching up and publishing one sample per read adds no drops. Two further publishes with no read add one drop, and `sequence` is 11
 
 `make test` and `ctest` run both suites. The pass line is `N passed, 0 failed`.
 
@@ -63,16 +66,18 @@ Use 3.0 V if VIN is the Pi's 3.3 V pin and the breakout regulator drops a few hu
 
 The program frees address `0x53`, then:
 
-1. `modprobe adxl34x-i2c` and instantiate `adxl34x 0x53`. This is the driver the Pi image ships. With no interrupt line it does not bind, and the report says so.
+1. `modprobe adxl34x-i2c` and apply `kernel/adxl34x-overlay.dts`, which describes GPIO17 as a level-high interrupt. This is the driver the Pi image ships. Its IRQ handler fills the `position` sysfs file. The input device is held open so the chip stays in measure mode.
 2. `insmod` the unmodified IIO modules from `kernel/stock/`, instantiate `adxl345 0x53` (or a small overlay if sysfs does not supply match data), zero `in_accel_*_calibbias`, and read 32 samples of `in_accel_*_raw`.
 3. `insmod kernel/adxl345_custom.ko` and take 32 samples from `/dev/adxl345_custom`.
 
-The two live series are converted at 256 LSB/g. The run passes when both magnitudes sit between 0.70 g and 1.30 g, each axis differs by at most 0.15 g, and the magnitudes differ by at most 0.10 g. Exit 0 on that pass, 1 when both drivers sampled but disagree, 2 when a driver produced no samples.
+The three series are converted at 256 LSB/g. The run passes when each magnitude sits between 0.70 g and 1.30 g, each axis of the IIO driver and of `adxl34x` differs from `adxl345_custom` by at most 0.15 g, and the magnitudes differ by at most 0.10 g. Exit 0 on that pass, 1 when the drivers sampled but disagree, 2 when a driver produced no samples.
 
 The custom module stays loaded after a probe so `/dev/adxl345_custom` can be read again. Remove it before `build/adxl345` or `build/adxl345_hw`, which open `/dev/i2c-1` themselves.
 
+`build/adxl345_irq` runs after that, against the module left loaded. It requires `mode` `irq` on GPIO17. It takes 64 blocking reads and checks that the handler's timestamps sit near 10 ms, that sequence numbers advance by one, and that the mean magnitude is about 1 g. It then pauses 300 ms and checks that `irq_count` and `dropped` keep moving while userspace is not reading. `i2c_errors` must stay at zero.
+
 ## GitHub Actions
 
-`.github/workflows/ci.yml` runs on each push and pull request. The runner is Ubuntu with g++ 14. `make test` builds the C++23 library, runs the unit and regression suites on the mock bus, and compiles `build/adxl345`, `build/adxl345_hw`, and `build/adxl345_compare`.
+`.github/workflows/ci.yml` runs on each push and pull request. The runner is Ubuntu with g++ 14. `make test` builds the C++23 library, runs the unit and regression suites on the mock bus, and compiles `build/adxl345`, `build/adxl345_hw`, `build/adxl345_compare`, and `build/adxl345_irq`.
 
 The kernel module is not built there. It needs the Pi's kernel headers, and loading it needs the ADXL345 on i2c-1. `build/adxl345_hw` and `build/adxl345_compare` are compiled so a break in those files fails CI, and they are not executed.
