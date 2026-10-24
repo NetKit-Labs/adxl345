@@ -1,0 +1,13 @@
+build/
+cmake-build-*/
+.cache/
+compile_commands.json
+*.o
+*.d
+*.ko
+*.mod
+*.mod.c
+*.cmd
+modules.order
+Module.symvers
+*.dtbo

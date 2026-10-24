@@ -1,0 +1,22 @@
+# The mock-bus unit and regression tests, plus a compile of the Linux
+# userspace programs. The kernel module and the on-target runs need the
+# Pi, its kernel headers, and the ADXL345, so they stay out of this job.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  userspace:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install g++ 14
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14
+
+      - name: Build and run the mock-bus tests
+        run: make test CXX=g++-14
