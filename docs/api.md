@@ -92,4 +92,4 @@ Nominal conversion uses 256 LSB/g. At 3.3 V the datasheet's typical X/Y sensitiv
 | `adxl345_custom_int_map` | `0` for INT1, `0x81` for INT2 (data-ready and overrun) |
 | `adxl345_custom_note_publish` | Next sequence number. Counts a drop when the previous sample was not taken |
 
-The module, the comparison program, and the mock-bus tests all include that header. Register programming for the C++ library is above. The load path, GPIO17, and the image-driver overlay are in [kernel.md](kernel.md).
+The module, the comparison program, and the mock-bus tests all include that header. With GPIO17 armed, `read()` blocks until the handler publishes a sample. With `irq_gpio=-1`, `read()` fetches the axes during the call and `poll()` reports the device readable immediately. `build/adxl345_modes` checks both on the Pi. Register programming for the C++ library is above. The load path, GPIO17, and the image-driver overlay are in [kernel.md](kernel.md).

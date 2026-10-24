@@ -1,6 +1,6 @@
 # Tests
 
-Three layers. `make test` always builds and runs the mock-bus suites. On Linux it also compiles the CLI, `build/adxl345_hw`, `build/adxl345_compare`, and `build/adxl345_irq`, and it does not run those programs.
+Three layers. `make test` always builds and runs the mock-bus suites. On Linux it also compiles the CLI, `build/adxl345_hw`, `build/adxl345_compare`, `build/adxl345_irq`, and `build/adxl345_modes`, and it does not run those programs.
 
 ## Unit tests
 
@@ -76,8 +76,10 @@ The custom module stays loaded after a probe so `/dev/adxl345_custom` can be rea
 
 `build/adxl345_irq` runs after that, against the module left loaded. It requires `mode` `irq` on GPIO17. It takes 64 blocking reads and checks that the handler's timestamps sit near 10 ms, that sequence numbers advance by one, and that the mean magnitude is about 1 g. It then pauses 300 ms and checks that `irq_count` and `dropped` keep moving while userspace is not reading. `i2c_errors` must stay at zero.
 
+`build/adxl345_modes` then reloads that module with `irq_gpio=-1`. It requires sysfs `mode` `poll`, `irq_gpio` `-1`, `int_line` `0`, and `trigger` `none`. `poll()` on `/dev/adxl345_custom` must report readable at once. Thirty-two reads, spaced about 10 ms apart, must each return in well under 50 ms, advance the sequence by 1, and leave `irq_count`, `dropped`, and `i2c_errors` at 0. The mean magnitude must sit between 0.70 g and 1.30 g. The program then loads the module again with the default GPIO17 interrupt, takes 32 blocking samples, and requires the same gravity band and a median interval near 10 ms. The two means must agree within 0.15 g on each axis and 0.10 g in magnitude. It leaves `adxl345_custom` loaded in interrupt mode. Exit 0 on that pass, 1 when a check fails, 2 when the module cannot be loaded, 3 when the program is not run as root.
+
 ## GitHub Actions
 
-`.github/workflows/ci.yml` runs on each push and pull request. The runner is Ubuntu with g++ 14. `make test` builds the C++23 library, runs the unit and regression suites on the mock bus, and compiles `build/adxl345`, `build/adxl345_hw`, `build/adxl345_compare`, and `build/adxl345_irq`.
+`.github/workflows/ci.yml` runs on each push and pull request. The runner is Ubuntu with g++ 14. `make test` builds the C++23 library, runs the unit and regression suites on the mock bus, and compiles `build/adxl345`, `build/adxl345_hw`, `build/adxl345_compare`, `build/adxl345_irq`, and `build/adxl345_modes`.
 
-The kernel module is not built there. It needs the Pi's kernel headers, and loading it needs the ADXL345 on i2c-1. `build/adxl345_hw` and `build/adxl345_compare` are compiled so a break in those files fails CI, and they are not executed.
+The kernel module is not built there. It needs the Pi's kernel headers, and loading it needs the ADXL345 on i2c-1. `build/adxl345_hw`, `build/adxl345_compare`, `build/adxl345_irq`, and `build/adxl345_modes` are compiled so a break in those files fails CI, and they are not executed.

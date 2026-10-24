@@ -28,16 +28,17 @@ The interrupt pin is Pi GPIO17, physical pin 11. Probe enables `DATA_READY` and 
 | `lsb_per_g` | `uint16` | `256` |
 | `sequence` | `uint32` | Increments once per captured sample |
 | `overruns` | `uint32` | Chip `OVERRUN` events seen by the handler |
-| `timestamp_ns` | `int64` | `CLOCK_MONOTONIC` when the handler stored the sample |
+| `timestamp_ns` | `int64` | `CLOCK_MONOTONIC` when the sample was published |
 
 A short read returns `-EINVAL`. The file offset is ignored, so a second `read()` on the same descriptor is the next sample.
 
-Sysfs on `1-0053` (the i2c client) has `x_raw`, `y_raw`, `z_raw`, `lsb_per_g`, `devid`, `mode`, `irq_gpio`, `int_line`, `trigger`, `irq_count`, `overruns`, `dropped`, `spurious`, `i2c_errors`, and `sequence`. In interrupt mode the axis files return the latched sample. The char device is the coherent read.
+Sysfs on `1-0053` (the i2c client) has `x_raw`, `y_raw`, `z_raw`, `lsb_per_g`, `devid`, `mode`, `irq_gpio`, `int_line`, `trigger`, `irq_count`, `overruns`, `dropped`, `spurious`, `i2c_errors`, and `sequence`. In interrupt mode the axis files return the latched sample. In poll mode they read the chip, and `timestamp_ns` is the time of that read. The char device is the coherent read.
 
 ```bash
 make -C kernel
 sudo insmod kernel/adxl345_custom.ko
 # optional: bus_num=1 addr=0x53 autoprobe=1 irq_gpio=17 int_line=0
+# polled read, no GPIO: sudo insmod kernel/adxl345_custom.ko irq_gpio=-1
 sudo rmmod adxl345_custom
 ```
 
@@ -53,11 +54,11 @@ echo adxl345_custom 0x53 | sudo tee /sys/bus/i2c/devices/i2c-1/new_device
 | --- | --- | --- | --- |
 | `adxl34x_i2c` | Shipped. `CONFIG_INPUT_ADXL34X_I2C=m` | `adxl34x` | Samples are taken in the interrupt handler. `kernel/adxl34x-overlay.dts` gives that handler GPIO17, level-high. |
 | `adxl345_i2c` | Unmodified sources in `kernel/stock/` from raspberrypi/linux `rpi-6.18.y` `drivers/iio/accel/` | `adxl345` | Polls `in_accel_*_raw`. No IRQ required. This image did not ship the `.ko`. |
-| `adxl345_custom` | `kernel/adxl345_custom.c` | `adxl345_custom` | Data-ready on GPIO17. `/dev/adxl345_custom` blocks until the next sample. |
+| `adxl345_custom` | `kernel/adxl345_custom.c` | `adxl345_custom` | Data-ready on GPIO17 by default, so `/dev/adxl345_custom` blocks until the next sample. `irq_gpio=-1` reads on demand. |
 
 `kernel/stock/` is built with the same out-of-tree Kbuild invocation. Those files are not a second copy of this module. They are the existing IIO driver, compiled so the test can load it without rebuilding vmlinux.
 
-`tools/run_kernel_compare.sh` builds all of that, runs `build/adxl345_compare`, then runs `build/adxl345_irq` against the loaded module. The numeric check uses 256 LSB/g for both live drivers. The IIO sysfs scale is printed as well. With `DATA_FORMAT` `0x08` the IIO scale table's ±2 g entry is not 3.9 mg/LSB; the comparison still uses the datasheet full-resolution scale so the counts can be compared directly.
+`tools/run_kernel_compare.sh` builds all of that, runs `build/adxl345_compare`, then `build/adxl345_irq`, then `build/adxl345_modes`. The comparison's numeric check uses 256 LSB/g for both live drivers. The IIO sysfs scale is printed as well. With `DATA_FORMAT` `0x08` the IIO scale table's ±2 g entry is not 3.9 mg/LSB; the comparison still uses the datasheet full-resolution scale so the counts can be compared directly. `build/adxl345_modes` reloads `adxl345_custom` with `irq_gpio=-1`, samples that polled read, loads the default GPIO17 interrupt again, and compares the two means on the same still board.
 
 On this 6.18 kernel, writing `adxl345 0x53` to `new_device` creates the client but does not bind `adxl345_i2c` (`device_get_match_data()` comes back empty). The comparison then applies `kernel/adxl345-overlay.dts`, whose `adi,adxl345` node does bind. The custom module does not need that overlay; its init creates the client itself.
 

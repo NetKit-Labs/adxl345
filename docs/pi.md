@@ -37,7 +37,7 @@ export NETKIT_PI_PASS='your-pi-password'
 3. `make clean all test`
 4. `./build/adxl345 scan`
 5. `./build/adxl345_hw`
-6. `./tools/run_kernel_compare.sh` (builds and loads the kernel modules, compares them, then checks GPIO17 data-ready)
+6. `./tools/run_kernel_compare.sh` (builds and loads the kernel modules, compares them, checks GPIO17 data-ready, then compares a polled reload with that interrupt)
 
 A missing part prints a wiring hint and exits 2. A failed gravity or self-test check exits 1. Unit and regression failures stop the script before the hardware run.
 

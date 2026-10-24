@@ -10,7 +10,7 @@ BINS := $(BUILD)/adxl345_tests
 ifeq ($(UNAME_S),Linux)
   LIB_OBJS += $(BUILD)/linux_i2c_bus.o
   CXXFLAGS += -DADXL345_HAS_LINUX_I2C
-  BINS += $(BUILD)/adxl345 $(BUILD)/adxl345_hw $(BUILD)/adxl345_compare $(BUILD)/adxl345_irq
+  BINS += $(BUILD)/adxl345 $(BUILD)/adxl345_hw $(BUILD)/adxl345_compare $(BUILD)/adxl345_irq $(BUILD)/adxl345_modes
 endif
 
 .PHONY: all test clean
@@ -39,6 +39,9 @@ $(BUILD)/adxl345_compare: tests/compare_kernel_drivers.cpp | $(BUILD)
 	$(CXX) $(CXXFLAGS) -pthread $< -o $@
 
 $(BUILD)/adxl345_irq: tests/irq_hw.cpp | $(BUILD)
+	$(CXX) $(CXXFLAGS) -pthread $< -o $@
+
+$(BUILD)/adxl345_modes: tests/mode_hw.cpp | $(BUILD)
 	$(CXX) $(CXXFLAGS) -pthread $< -o $@
 
 clean:
