@@ -7,7 +7,7 @@ Two complementary Linux I²C implementations for the ADXL345 accelerometer, vali
 
 ## Why
 
-The kernel module is the device driver. `insmod` loads it. The kernel image is not rebuilt. The module uses the I2C core and the Pi's adapter driver already in that image, and it configures the ADXL345 by writing the chip's registers. The part has no processor and no firmware to load.
+The kernel module is the device driver. `insmod` loads it. The kernel image is not rebuilt. The module uses the I2C core and the platform's existing adapter driver, and it configures the ADXL345 by writing the chip's registers. The part has no processor and no firmware to load.
 
 The module samples in either of two ways, and both were run on this board. The default is a data-ready interrupt on GPIO17: the pin wakes the module, and userspace reads one sample at a time from `/dev/adxl345_custom`. Load it with `irq_gpio=-1` and the same device node polls: each `read()` fetches the sample over I2C. If the interrupt wire stays quiet, probe logs that and uses the polled read.
 
