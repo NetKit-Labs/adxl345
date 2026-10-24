@@ -16,7 +16,11 @@ Full resolution keeps the scale at 256 LSB/g (3.9 mg/LSB) at every range. ±2 g 
 
 Reads use SMBus byte and I2C-block helpers. A sample is one 6-byte read at `DATAX0` (`0x32`). The SPI multi-byte bit is not set. The block helpers copy into a DMA-safe buffer because the Pi I2C adapter may DMA.
 
-The interrupt pin is Pi GPIO17, physical pin 11. Probe enables `DATA_READY` and `OVERRUN`, then tries INT1 and, if that pin stays quiet, INT2. The GPIO interrupt is level-high because the pin remains asserted until `DATAX0` through `DATAZ1` are read. `read()` sleeps on a wait queue until the handler stores a sample. `irq_gpio=-1` skips the GPIO and reads on demand. A missing edge is logged and the module falls back to that polled read instead of failing probe.
+The interrupt pin is Pi GPIO17, physical pin 11. Probe enables `DATA_READY` and `OVERRUN`, then tries INT1 and, if that pin stays quiet, INT2. The GPIO interrupt is level-high because the pin remains asserted until `DATAX0` through `DATAZ1` are read. `read()` sleeps on a wait queue until the handler stores a sample. A missing edge is logged and the module falls back to a polled read instead of failing probe.
+
+## Polling
+
+`irq_gpio=-1` selects polling on purpose. Probe does not request GPIO17. Each `read()` of `/dev/adxl345_custom` does one 6-byte I2C burst and returns that sample. Sysfs `mode` is `poll`. The C++23 library is a separate poller: it opens `/dev/i2c-1` and waits on `INT_SOURCE`. Remove this module before that library runs.
 
 ## Device node
 

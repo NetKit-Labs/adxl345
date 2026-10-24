@@ -2,14 +2,16 @@
 
 Two separate pieces for the Adafruit ADXL345 on a Raspberry Pi Zero 2 W:
 
-- A C++23 userspace library. It opens `/dev/i2c-N` and uses `I2C_RDWR`.
-- A loadable kernel module, `kernel/adxl345_custom.c`. It is C, built out of tree, and it is not the driver already in the kernel.
+- A C++23 userspace library. It opens `/dev/i2c-N` and polls the chip.
+- A loadable kernel module, `kernel/adxl345_custom.c`. It is C, built out of tree. The default is a GPIO17 data-ready interrupt. `irq_gpio=-1` polls over I2C.
 
 ## Why
 
-The kernel module is the device driver. `insmod` loads it. The kernel image is not rebuilt. The module uses the I2C core and the Pi's adapter driver already in that image, and it configures the ADXL345 by writing the chip's registers. The part has no processor and no firmware to load. After probe, data-ready on GPIO17 wakes the module, and userspace reads one sample at a time from `/dev/adxl345_custom`. `irq_gpio=-1` skips that pin: each `read()` fetches the sample over I2C.
+The kernel module is the device driver. `insmod` loads it. The kernel image is not rebuilt. The module uses the I2C core and the Pi's adapter driver already in that image, and it configures the ADXL345 by writing the chip's registers. The part has no processor and no firmware to load.
 
-The C++23 library is a second program. It opens `/dev/i2c-1` itself. Its unit and regression tests run on a mock bus, so they do not need the board.
+The module samples in either of two ways, and both were run on this board. The default is a data-ready interrupt on GPIO17: the pin wakes the module, and userspace reads one sample at a time from `/dev/adxl345_custom`. Load it with `irq_gpio=-1` and the same device node polls: each `read()` fetches the sample over I2C. If the interrupt wire stays quiet, probe logs that and uses the polled read.
+
+The C++23 library is a second program, and it polls. It opens `/dev/i2c-1` itself and waits on the chip's `INT_SOURCE` bit. Its unit and regression tests run on a mock bus, so they do not need the board.
 
 The image already ships an ADXL345 input driver, `adxl34x`, and the kernel tree also has an IIO driver, `adxl345_i2c`. The custom module uses its own id, `adxl345_custom`, so those drivers keep theirs. `adxl34x` samples from its own interrupt handler once `kernel/adxl34x-overlay.dts` gives it GPIO17. This image had not built the IIO module, so the comparison compiles that unmodified source and reads it beside the other two while the board sits still. Details are in [docs/kernel.md](docs/kernel.md). SPI is not implemented.
 
@@ -21,7 +23,7 @@ The image already ships an ADXL345 input driver, `adxl34x`, and the kernel tree 
 | `build/adxl345` | CLI: scan, identify, read, dump, self-test, calibrate |
 | `build/adxl345_tests` | Unit tests and datasheet regression tests on a mock bus. No hardware. |
 | `build/adxl345_hw` | On-target checks: device id, register readback, gravity, self-test |
-| `kernel/adxl345_custom.c` | Loadable kernel module. Device node `/dev/adxl345_custom` |
+| `kernel/adxl345_custom.c` | Loadable kernel module. GPIO17 interrupt by default, or a polled read with `irq_gpio=-1`. Device node `/dev/adxl345_custom` |
 | `build/adxl345_compare` | Linux-only C++23 program. Loads each kernel driver and compares samples |
 | `build/adxl345_irq` | Linux-only check that GPIO17 data-ready interrupts arrive near 100 Hz |
 | `build/adxl345_modes` | Linux-only check that a polled reload and the GPIO17 interrupt agree |
@@ -50,7 +52,15 @@ CS and SDO stay unconnected. The Adafruit board pulls CS high, which selects I2C
 
 Sysfs on the i2c device reports `mode`, `int_line`, `trigger`, `irq_count`, `overruns`, `dropped`, `spurious`, and `i2c_errors`. `build/adxl345_irq` checks that the interrupts arrive near 100 Hz, that unread samples are counted, and that gravity is still about 1 g. `build/adxl345_modes` reloads the module with `irq_gpio=-1`, checks that those reads do not use GPIO17, then loads the interrupt again and compares the two means.
 
-The C++23 library still polls through `/dev/i2c-1`. It does not use this GPIO. The image's `adxl34x` driver uses the same INT wire when `kernel/adxl34x-overlay.dts` is loaded: that node is what gives the I2C client its IRQ number. The comparison's IIO driver polls, because its node does not describe an interrupt.
+The image's `adxl34x` driver uses the same INT wire when `kernel/adxl34x-overlay.dts` is loaded: that node is what gives the I2C client its IRQ number. The comparison's IIO driver polls, because its node does not describe an interrupt.
+
+## Polling
+
+Polling is a supported path in both programs.
+
+The kernel module polls when `irq_gpio=-1`. Sysfs `mode` is `poll`, `int_line` is `0`, and `trigger` is `none`. `read()` returns the 24-byte sample during the call. `poll()` on `/dev/adxl345_custom` reports the device readable immediately. A requested GPIO that never sees data-ready uses this same read, and probe still succeeds. `build/adxl345_modes` took a polled series and a GPIO17 series on the same still board.
+
+The C++23 library polls through `/dev/i2c-1`. `read_raw_when_ready()` reads `INT_SOURCE` until the data-ready bit is set, then does the 6-byte burst. It does not request GPIO17. `build/adxl345_hw` runs that path on the breakout: device id, register readback, a synced sample burst, and self-test. Remove `adxl345_custom` before starting it. Only one program can own address `0x53`.
 
 ## Build
 
