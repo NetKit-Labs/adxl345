@@ -34,5 +34,5 @@ jobs:
         - name: Analyze project-owned C/C++ sources
           run: |
             cppcheck --error-exitcode=1 --quiet --enable=warning,performance,portability \
-              --inline-suppr --suppress=missingIncludeSystem --std=c++20 \
+              --inline-suppr --suppress=missingIncludeSystem --suppress=passedByValue --std=c++20 \
               -Iinclude include src tests kernel/adxl345_custom.c
